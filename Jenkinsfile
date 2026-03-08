@@ -3,13 +3,13 @@ node {
     def mvnHome = tool name: 'maven', type: 'maven'
     def mvnCMD = "${mvnHome}/bin/mvn "
     
-    // Constructing the registry path
+    // Note: Ensure PROJECT_ID and ARTIFACT_REGISTRY are set in Jenkins Environment
     def registryUrl = "us-west4-docker.pkg.dev"
     def fullRepoPath = "${registryUrl}/${env.PROJECT_ID}/${env.ARTIFACT_REGISTRY}"
 
     try {
         stage('Cleanup') {
-            // Wipes the workspace to prevent "Revision not found" errors from old metadata
+            // Wipes the workspace to ensure a fresh clone
             cleanWs() 
         }
 
@@ -32,7 +32,8 @@ node {
                 sh "gcloud auth activate-service-account --key-file=${GC_KEY}"
                 sh "gcloud auth configure-docker ${registryUrl}"
                 
-                // Build with Jib and push to Artifact Registry
+                // FIXED: Removed the trailing 'spring-microservices' text
+                // This command now correctly ends after the DREPO_URL parameter
                 sh "${mvnCMD} clean install jib:build -DREPO_URL=${fullRepoPath}"
             }
         }
