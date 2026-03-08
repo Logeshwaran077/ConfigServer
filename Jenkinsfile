@@ -1,16 +1,16 @@
 node {
-    // 1. Define Variables
+    // 1. Define Tools and Variables
     def mvnHome = tool name: 'maven', type: 'maven'
     def mvnCMD = "${mvnHome}/bin/mvn "
     
-    // Note: Ensure these environment variables are defined in your Jenkins Job 
-    // or globally in Manage Jenkins > Configure System
+    // Constructing the registry path
     def registryUrl = "us-west4-docker.pkg.dev"
-    def fullRepoPath = "${registryUrl}/${PROJECT_ID}/${ARTIFACT_REGISTRY}"
+    def fullRepoPath = "${registryUrl}/${env.PROJECT_ID}/${env.ARTIFACT_REGISTRY}"
 
     try {
         stage('Cleanup') {
-            cleanWs() // Deletes the workspace before starting to avoid "Revision" errors
+            // Wipes the workspace to prevent "Revision not found" errors from old metadata
+            cleanWs() 
         }
 
         stage('Checkout') {
@@ -28,12 +28,11 @@ node {
 
         stage('Build and Push Image') {
             withCredentials([file(credentialsId: 'gcp', variable: 'GC_KEY')]) {
-                // Authenticate with Google Cloud
+                // Authenticate and configure Docker for GCP
                 sh "gcloud auth activate-service-account --key-file=${GC_KEY}"
                 sh "gcloud auth configure-docker ${registryUrl}"
                 
                 // Build with Jib and push to Artifact Registry
-                // Fixed: Changed PROJECTID to PROJECT_ID to match your standard
                 sh "${mvnCMD} clean install jib:build -DREPO_URL=${fullRepoPath}"
             }
         }
@@ -48,7 +47,7 @@ node {
                 clusterName: env.CLUSTER,
                 location: env.ZONE,
                 manifestPattern: 'k8s/deployment.yaml',
-                credentialsId: 'gcp', // Usually matches the GCP JSON key ID
+                credentialsId: 'gcp', 
                 verifyDeployments: true
             ])
         }
