@@ -1,9 +1,11 @@
 node {
-    // 1. Define Tools and Variables
+    // 1. FORCE AUTH PLUGIN USAGE
+    env.USE_GKE_GCLOUD_AUTH_PLUGIN = 'true'
+
+    // 2. Define Tools and Variables
     def mvnHome = tool name: 'maven', type: 'maven'
     def mvnCMD = "${mvnHome}/bin/mvn "
     
-    // Using environment variables or defaults
     def project = "cyber-security-48"
     def repo = "spring-microservices"
     def registryUrl = "us-west4-docker.pkg.dev"
@@ -27,34 +29,30 @@ node {
             ])
         }
 
-        // Use the 'gcp' secret file for the entire lifecycle
         withCredentials([file(credentialsId: 'gcp', variable: 'GC_KEY')]) {
             
             stage('Build and Push Image') {
-                // Using single quotes for sh to avoid Groovy interpolation warnings
                 sh '''
                     gcloud auth activate-service-account --key-file=$GC_KEY
                     gcloud auth configure-docker ''' + registryUrl + ''' --quiet
                 '''
-                
-                // Build and push using Jib
                 sh "${mvnCMD} clean compile jib:build -Djib.to.image=${fullRepoPath}"
             }
 
             stage('Deploy to GKE') {
                 sh '''
-                    # 1. Authenticate with Service Account
+                    # 1. Authenticate
                     gcloud auth activate-service-account --key-file=$GC_KEY
                     
-                    # 2. Configure kubectl for GKE (Uses the gke-gcloud-auth-plugin automatically)
+                    # 2. Get cluster credentials
                     gcloud container clusters get-credentials ''' + clusterName + ''' \
                         --zone ''' + zone + ''' \
                         --project ''' + project + '''
                     
-                    # 3. Update the image placeholder in the deployment manifest
+                    # 3. Update the YAML
                     sed -i "s|IMAGE_URL|''' + fullRepoPath + '''|g" k8s/deployment.yaml
                     
-                    # 4. Apply to Cluster
+                    # 4. Apply
                     kubectl apply -f k8s/deployment.yaml
                 '''
             }
