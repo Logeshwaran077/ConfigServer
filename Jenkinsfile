@@ -3,7 +3,7 @@ node {
     def mvnHome = tool name: 'maven', type: 'maven'
     def mvnCMD = "${mvnHome}/bin/mvn "
     
-    // SANITIZATION: Removes accidental spaces and forces lowercase
+    // SANITIZATION: Removes accidental spaces and forces lowercase for Docker rules
     def project = env.PROJECT_ID.trim().toLowerCase()
     def repo = env.ARTIFACT_REGISTRY.trim().toLowerCase()
     
@@ -27,31 +27,32 @@ node {
             ])
         }
 
-        // We wrap both Build and Deploy in the same credential block
+        // Use the 'gcp' secret file for both Build and Deploy stages
         withCredentials([file(credentialsId: 'gcp', variable: 'GC_KEY')]) {
             
             stage('Build and Push Image') {
-                // Authenticate gcloud for the Jib push
+                // Authenticate with Google Cloud
                 sh "gcloud auth activate-service-account --key-file=${GC_KEY}"
                 sh "gcloud auth configure-docker ${registryUrl} --quiet"
                 
+                // Build and push using Jib
                 sh "${mvnCMD} clean compile jib:build \"-Djib.to.image=${fullRepoPath}\""
             }
 
             stage('Deploy') {
-                // Update the image placeholder in your K8s manifest
+                echo "Deploying to GKE cluster: ${env.CLUSTER}"
+                
+                // 1. Update the image placeholder in your K8s manifest
                 sh "sed -i 's|IMAGE_URL|${fullRepoPath}|g' k8s/deployment.yaml"
                 
-                // Use the GKE Builder with the validated 'gcp' credential ID
-                step([
-                    $class: 'KubernetesEngineBuilder',
-                    projectId: project,
-                    clusterName: env.CLUSTER.trim(),
-                    location: env.ZONE.trim(),
-                    manifestPattern: 'k8s/deployment.yaml',
-                    credentialsId: 'gcp', 
-                    verifyDeployments: true
-                ])
+                // 2. Configure kubectl to point to your specific GKE cluster
+                sh "gcloud container clusters get-credentials ${env.CLUSTER.trim()} --zone ${env.ZONE.trim()} --project ${project}"
+
+                // 3. Apply the manifest directly (bypass the plugin that was failing)
+                sh "kubectl apply -f k8s/deployment.yaml"
+                
+                // 4. Verify the rollout status
+                sh "kubectl rollout status deployment/config-server"
             }
         }
         
