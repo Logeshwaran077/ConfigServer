@@ -3,12 +3,13 @@ node {
     def mvnHome = tool name: 'maven', type: 'maven'
     def mvnCMD = "${mvnHome}/bin/mvn "
     
-    // SANITIZATION: Removes accidental spaces and forces lowercase for Docker rules
-    def project = env.PROJECT_ID.trim().toLowerCase()
-    def repo = env.ARTIFACT_REGISTRY.trim().toLowerCase()
-    
+    // Using environment variables or defaults
+    def project = "cyber-security-48"
+    def repo = "spring-microservices"
     def registryUrl = "us-west4-docker.pkg.dev"
     def fullRepoPath = "${registryUrl}/${project}/${repo}/config-server"
+    def clusterName = "microservices-cluster-1"
+    def zone = "us-west4"
 
     try {
         stage('Cleanup') {
@@ -19,7 +20,6 @@ node {
             checkout([
                 $class: 'GitSCM', 
                 branches: [[name: '*/main']], 
-                extensions: [], 
                 userRemoteConfigs: [[
                     url: 'https://github.com/Logeshwaran077/ConfigServer.git',
                     credentialsId: 'git' 
@@ -27,36 +27,36 @@ node {
             ])
         }
 
-        // Use the 'gcp' secret file for both Build and Deploy stages
+        // Use the 'gcp' secret file for the entire lifecycle
         withCredentials([file(credentialsId: 'gcp', variable: 'GC_KEY')]) {
             
             stage('Build and Push Image') {
-                sh "gcloud auth activate-service-account --key-file=${GC_KEY}"
-                sh "gcloud auth configure-docker ${registryUrl} --quiet"
+                // Using single quotes for sh to avoid Groovy interpolation warnings
+                sh '''
+                    gcloud auth activate-service-account --key-file=$GC_KEY
+                    gcloud auth configure-docker ''' + registryUrl + ''' --quiet
+                '''
                 
                 // Build and push using Jib
-                sh "${mvnCMD} clean compile jib:build \"-Djib.to.image=${fullRepoPath}\""
+                sh "${mvnCMD} clean compile jib:build -Djib.to.image=${fullRepoPath}"
             }
 
-            stage('Deploy') {
-                echo "Deploying to GKE cluster: ${env.CLUSTER}"
-                
-                // 1. Update the image placeholder in your K8s manifest
-                sh "sed -i 's|IMAGE_URL|${fullRepoPath}|g' k8s/deployment.yaml"
-                
-                // 2. Re-authenticate to ensure session is active
-                sh "gcloud auth activate-service-account --key-file=${GC_KEY}"
-
-                // 3. STATIC TOKEN WORKAROUND
-                // We manually fetch the token and endpoint to bypass the missing auth plugin
-                def token = sh(script: "gcloud auth print-access-token", returnStdout: true).trim()
-                def clusterEndpoint = sh(script: "gcloud container clusters describe ${env.CLUSTER.trim()} --zone ${env.ZONE.trim()} --project ${project} --format='get(endpoint)'", returnStdout: true).trim()
-
-                // 4. Apply using the token and endpoint directly
-                // --insecure-skip-tls-verify is used because we are connecting via the raw IP endpoint
-                sh "kubectl --token=${token} --server=https://${clusterEndpoint} --insecure-skip-tls-verify apply -f k8s/deployment.yaml"
-                
-                echo "Deployment successful."
+            stage('Deploy to GKE') {
+                sh '''
+                    # 1. Authenticate with Service Account
+                    gcloud auth activate-service-account --key-file=$GC_KEY
+                    
+                    # 2. Configure kubectl for GKE (Uses the gke-gcloud-auth-plugin automatically)
+                    gcloud container clusters get-credentials ''' + clusterName + ''' \
+                        --zone ''' + zone + ''' \
+                        --project ''' + project + '''
+                    
+                    # 3. Update the image placeholder in the deployment manifest
+                    sed -i "s|IMAGE_URL|''' + fullRepoPath + '''|g" k8s/deployment.yaml
+                    
+                    # 4. Apply to Cluster
+                    kubectl apply -f k8s/deployment.yaml
+                '''
             }
         }
         
