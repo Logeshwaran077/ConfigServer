@@ -34,7 +34,7 @@ node {
                 
                 // FIXED: Removed the trailing 'spring-microservices' text
                 // This command now correctly ends after the DREPO_URL parameter
-                sh "${mvnCMD} clean install jib:build -DREPO_URL=${fullRepoPath}"
+                sh "${mvnCMD} clean install jib:build \"-DREPO_URL=${fullRepoPath}\""
             }
         }
 
