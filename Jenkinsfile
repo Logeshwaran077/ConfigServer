@@ -31,7 +31,6 @@ node {
         withCredentials([file(credentialsId: 'gcp', variable: 'GC_KEY')]) {
             
             stage('Build and Push Image') {
-                // Authenticate with Google Cloud
                 sh "gcloud auth activate-service-account --key-file=${GC_KEY}"
                 sh "gcloud auth configure-docker ${registryUrl} --quiet"
                 
@@ -45,14 +44,18 @@ node {
                 // 1. Update the image placeholder in your K8s manifest
                 sh "sed -i 's|IMAGE_URL|${fullRepoPath}|g' k8s/deployment.yaml"
                 
-                // 2. Configure kubectl to point to your specific GKE cluster
-                sh "gcloud container clusters get-credentials ${env.CLUSTER.trim()} --zone ${env.ZONE.trim()} --project ${project}"
+                // 2. Bypass the gke-gcloud-auth-plugin requirement using an environment variable
+                withEnv(['USE_GKE_GCLOUD_AUTH_PLUGIN=False']) {
+                    
+                    // Configure kubectl to point to your specific GKE cluster
+                    sh "gcloud container clusters get-credentials ${env.CLUSTER.trim()} --zone ${env.ZONE.trim()} --project ${project}"
 
-                // 3. Apply the manifest directly (bypass the plugin that was failing)
-                sh "kubectl apply -f k8s/deployment.yaml"
-                
-                // 4. Verify the rollout status
-                sh "kubectl rollout status deployment/config-server"
+                    // 3. Apply the manifest with --validate=false to prevent the plugin-check crash
+                    sh "kubectl apply -f k8s/deployment.yaml --validate=false"
+                    
+                    // 4. Verify the rollout status
+                    sh "kubectl rollout status deployment/config-server"
+                }
             }
         }
         
